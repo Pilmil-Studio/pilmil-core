@@ -22,5 +22,5 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Tests unitaires et assemblage Android
-        run: ./gradlew testDebugUnitTest assembleDebug
+      - name: Tests unitaires, lint et assemblage Android
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
