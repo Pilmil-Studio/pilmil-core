@@ -3,3 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.kotlin.compose) apply false
 }
+
+allprojects {
+    group = "fr.pilmil.core"
+    version = "0.1.0"
+}
