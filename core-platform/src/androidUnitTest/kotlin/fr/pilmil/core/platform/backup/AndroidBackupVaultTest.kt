@@ -50,6 +50,33 @@ class AndroidBackupVaultTest {
     }
 
     @Test
+    fun testAes256GcmCrossCompatibilityWithJavaxCrypto() {
+        val salt = ByteArray(16) { (it + 1).toByte() }
+        val iv = ByteArray(12) { (it + 10).toByte() }
+        val pass = "MotDePasseCrossPlatform2026!".toCharArray()
+        val keyCommon = Aes256Gcm.pbkdf2HmacSha256(pass.concatToString().encodeToByteArray(), salt, 2_000)
+
+        val spec = PBEKeySpec(pass, salt, 2_000, 256)
+        val keyJvm = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        assertTrue(keyCommon.contentEquals(keyJvm))
+
+        val plaintext = "date;flow;note\n2026-11-15;Léger;Test Android <-> iOS".encodeToByteArray()
+        val ctCommon = Aes256Gcm.encrypt(keyCommon, iv, plaintext)
+
+        // Déchiffrement par javax.crypto (Android) d'un message chiffré par Aes256Gcm (iOS)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyJvm, "AES"), GCMParameterSpec(128, iv))
+        val decryptedByJvm = cipher.doFinal(ctCommon)
+        assertTrue(plaintext.contentEquals(decryptedByJvm))
+
+        // Déchiffrement par Aes256Gcm (iOS) d'un message chiffré par javax.crypto (Android)
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyJvm, "AES"), GCMParameterSpec(128, iv))
+        val ctJvm = cipher.doFinal(plaintext)
+        val decryptedByCommon = Aes256Gcm.decrypt(keyCommon, iv, ctJvm)
+        assertTrue(plaintext.contentEquals(decryptedByCommon))
+    }
+
+    @Test
     fun testDecryptionFailsWithTamperedCiphertext() {
         val payload = """{"sensitiveHealthData":"confidential"}"""
         val container = vault.encrypt(payload, passphrase)
