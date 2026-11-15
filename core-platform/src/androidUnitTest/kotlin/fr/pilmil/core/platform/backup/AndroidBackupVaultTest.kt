@@ -3,14 +3,17 @@ package fr.pilmil.core.platform.backup
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.security.SecureRandom
 import java.util.zip.GZIPOutputStream
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AndroidBackupVaultTest {
@@ -202,5 +205,137 @@ class AndroidBackupVaultTest {
     fun testDefaultIterationsAreStoredInHeader() {
         val container = AndroidBackupVault().encrypt("data", passphrase)
         assertEquals(AndroidBackupVault.DEFAULT_ITERATIONS, ByteBuffer.wrap(container).getInt(23))
+    }
+
+    @Test
+    fun testSamePayloadProducesDistinctContainers() {
+        val payload = """{"app":"fredonne","notes":["C4","D4","E4"]}"""
+        val first = vault.encrypt(payload, passphrase)
+        val second = vault.encrypt(payload, passphrase)
+
+        assertFalse(first.contentEquals(second), "Deux chiffrements doivent générer sel et IV distincts")
+        assertEquals(payload, vault.decrypt(first, passphrase))
+        assertEquals(payload, vault.decrypt(second, passphrase))
+    }
+
+    @Test
+    fun testInjectedSecureRandomDeterminesSaltAndIv() {
+        val fixedSalt = ByteArray(AndroidBackupVault.SALT_LENGTH) { (it + 1).toByte() }
+        val fixedIv = ByteArray(AndroidBackupVault.IV_LENGTH) { (it + 50).toByte() }
+        val deterministicRandom = object : SecureRandom() {
+            private var callCount = 0
+            override fun nextBytes(bytes: ByteArray) {
+                val source = if (callCount == 0) fixedSalt else fixedIv
+                callCount++
+                source.copyInto(bytes)
+            }
+        }
+
+        val deterministicVault = AndroidBackupVault(iterations = 2_000, secureRandom = deterministicRandom)
+        val container = deterministicVault.encrypt("payload", passphrase)
+
+        assertContentEquals(fixedSalt, container.copyOfRange(7, 23))
+        assertContentEquals(fixedIv, container.copyOfRange(27, 39))
+        assertEquals("payload", deterministicVault.decrypt(container, passphrase))
+    }
+
+    @Test
+    fun testPassphraseCharArrayIsNotMutated() {
+        val original = "MotDePasse#2026".toCharArray()
+        val workingCopy = original.copyOf()
+
+        val container = vault.encrypt("secret", workingCopy)
+        assertContentEquals(original, workingCopy, "encrypt ne doit pas altérer le tableau passé par l'appelant")
+
+        val restored = vault.decrypt(container, workingCopy)
+        assertEquals("secret", restored)
+        assertContentEquals(original, workingCopy, "decrypt ne doit pas altérer le tableau passé par l'appelant")
+    }
+
+    @Test
+    fun testUnicodePayloadAndPassphraseRoundTrip() {
+        val unicodePassphrase = "Été-2026-\u65E5\u672C\u8A9E-\uD83C\uDF31".toCharArray()
+        val unicodePayload = "Ligne 1 : éàùçœæ\nLigne 2 : \u4E2D\u6587\nLigne 3 : \uD83C\uDF3F"
+
+        val container = vault.encrypt(unicodePayload, unicodePassphrase)
+        assertEquals(unicodePayload, vault.decrypt(container, unicodePassphrase))
+    }
+
+    @Test
+    fun testIterationsBoundaryValuesAreAccepted() {
+        val payload = """{"boundary":"iterations"}"""
+
+        val minContainer = buildContainer(payload.toByteArray(), iterations = AndroidBackupVault.MIN_ITERATIONS)
+        assertEquals(payload, vault.decrypt(minContainer, passphrase))
+
+        val maxContainer = buildContainer(payload.toByteArray(), iterations = AndroidBackupVault.MAX_ITERATIONS)
+        assertEquals(payload, vault.decrypt(maxContainer, passphrase))
+    }
+
+    @Test
+    fun testDecompressedSizeBoundaryExactAndPlusOne() {
+        val limit = 1024
+        val limited = AndroidBackupVault(iterations = 2_000, maxDecompressedSize = limit)
+
+        val exactContainer = buildContainer(ByteArray(limit) { 'A'.code.toByte() }, iterations = 2_000)
+        assertEquals("A".repeat(limit), limited.decrypt(exactContainer, passphrase))
+
+        val overByOneContainer = buildContainer(ByteArray(limit + 1) { 'A'.code.toByte() }, iterations = 2_000)
+        assertFailsWith<CorruptedBackupException> {
+            limited.decrypt(overByOneContainer, passphrase)
+        }
+    }
+
+    @Test
+    fun testMultiChunkPayloadRoundTrip() {
+        // Charge utile > CHUNK_SIZE (8 KiB) avec entropie variée pour exercer plusieurs itérations de lecture GZIP
+        val multiChunkPayload = (0 until 1500).joinToString("\n") { index ->
+            "entry-$index-${(index * 7919) % 10000}"
+        }
+        assertTrue(multiChunkPayload.toByteArray(Charsets.UTF_8).size > AndroidBackupVault.CHUNK_SIZE * 2)
+
+        val container = vault.encrypt(multiChunkPayload, passphrase)
+        assertEquals(multiChunkPayload, vault.decrypt(container, passphrase))
+    }
+
+    @Test
+    fun testEmptyAndMinimumSizeContainersFailAppropriately() {
+        assertFailsWith<CorruptedBackupException> {
+            vault.decrypt(ByteArray(0), passphrase)
+        }
+
+        // Conteneur exactement de taille MIN_CONTAINER_SIZE avec en-tête valide mais tag aléatoire
+        val minSizedInvalid = ByteArray(AndroidBackupVault.MIN_CONTAINER_SIZE)
+        ByteBuffer.wrap(minSizedInvalid)
+            .put(AndroidBackupVault.MAGIC)
+            .put(AndroidBackupVault.VERSION)
+            .put(ByteArray(AndroidBackupVault.SALT_LENGTH))
+            .putInt(2_000)
+            .put(ByteArray(AndroidBackupVault.IV_LENGTH))
+        assertFailsWith<InvalidPassphraseException> {
+            vault.decrypt(minSizedInvalid, passphrase)
+        }
+    }
+
+    @Test
+    fun testTruncatedOrExtendedCiphertextFails() {
+        val container = vault.encrypt("data", passphrase)
+
+        assertFailsWith<InvalidPassphraseException> {
+            vault.decrypt(container.copyOf(container.size - 1), passphrase)
+        }
+        assertFailsWith<InvalidPassphraseException> {
+            vault.decrypt(container + byteArrayOf(0x00), passphrase)
+        }
+    }
+
+    @Test
+    fun testTamperedAuthTagLastByteFails() {
+        val container = vault.encrypt("data", passphrase)
+        container[container.lastIndex] = (container[container.lastIndex].toInt() xor 0x01).toByte()
+
+        assertFailsWith<InvalidPassphraseException> {
+            vault.decrypt(container, passphrase)
+        }
     }
 }

@@ -31,12 +31,7 @@ class AndroidHapticFeedback(context: Context) : HapticFeedback {
 
     override fun pulseWarning() {
         if (vibrator?.hasVibrator() != true) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(150L, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(150L)
-        }
+        vibrator.vibrate(VibrationEffect.createOneShot(150L, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     override fun isSupported(): Boolean = vibrator?.hasVibrator() == true

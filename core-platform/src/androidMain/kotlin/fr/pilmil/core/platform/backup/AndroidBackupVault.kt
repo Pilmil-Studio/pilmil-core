@@ -158,7 +158,11 @@ class AndroidBackupVault(
         val spec = PBEKeySpec(passphrase, salt, iter, KEY_LENGTH_BITS)
         try {
             val rawKey = factory.generateSecret(spec).encoded
-            return SecretKeySpec(rawKey, "AES")
+            try {
+                return SecretKeySpec(rawKey, "AES")
+            } finally {
+                rawKey.fill(0)
+            }
         } finally {
             spec.clearPassword()
         }
