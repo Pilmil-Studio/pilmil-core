@@ -19,6 +19,16 @@ class IosBackupVaultTest {
     }
 
     @Test
+    fun opensTheFixedContainerProducedByAndroid() {
+        val vault = IosBackupVault(iterations = 2_000)
+
+        assertEquals(
+            PilmilV1Vector.PLAINTEXT,
+            vault.decrypt(PilmilV1Vector.container(), PilmilV1Vector.PASSPHRASE.toCharArray()),
+        )
+    }
+
+    @Test
     fun wrongPassphraseThrowsInvalidPassphraseException() {
         val vault = IosBackupVault(iterations = 2_000)
         val encrypted = vault.encrypt("secret", "bonne-phrase".toCharArray())

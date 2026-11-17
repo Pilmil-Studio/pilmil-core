@@ -39,6 +39,9 @@ class IosBackupVault(
     companion object {
         val MAGIC: ByteArray = "PILMIL".encodeToByteArray()
         const val VERSION: Byte = 1
+
+        /** AAD du format v1 : Magic + Version, identique à Android, pour que les deux plateformes s'ouvrent mutuellement. */
+        private val AAD: ByteArray = byteArrayOf(*MAGIC, VERSION)
         const val DEFAULT_ITERATIONS: Int = 600_000
         const val SALT_LENGTH: Int = 16
         const val IV_LENGTH: Int = 12
@@ -62,7 +65,7 @@ class IosBackupVault(
         val iv = randomBytes(IV_LENGTH)
         val key = Aes256Gcm.pbkdf2HmacSha256(passphrase.concatToString().encodeToByteArray(), salt, iterations)
 
-        val ciphertext = Aes256Gcm.encrypt(key, iv, compressed)
+        val ciphertext = Aes256Gcm.encrypt(key, iv, compressed, AAD)
         val out = ByteArray(HEADER_LENGTH + ciphertext.size)
         var pos = 0
         MAGIC.copyInto(out, pos); pos += MAGIC.size
@@ -106,7 +109,7 @@ class IosBackupVault(
         val ciphertext = container.copyOfRange(pos, container.size)
 
         val key = Aes256Gcm.pbkdf2HmacSha256(passphrase.concatToString().encodeToByteArray(), salt, iters)
-        val compressed = Aes256Gcm.decrypt(key, iv, ciphertext)
+        val compressed = Aes256Gcm.decrypt(key, iv, ciphertext, AAD)
         val plain = gzipDecompress(compressed, maxDecompressedSize)
         return plain.decodeToString()
     }
