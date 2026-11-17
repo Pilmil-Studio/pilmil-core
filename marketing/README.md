@@ -13,10 +13,12 @@ Génère les visuels des applis (captures Play Store, image de présentation, ba
 # 2. Visuels fr et en
 ./build_all.sh ../../sommelle          # écrit <appli>/docs/marketing/out/<fr|en>/
 python3 generate.py --app-dir ../../sommelle --lang fr --only store_01   # un seul fichier
+./build_all.sh ../../sommelle --no-side            # sans les visuels « côté »
+./build_all.sh ../../sommelle --out-dir /tmp/out   # autre dossier de sortie (un sous-dossier par langue)
 ```
 
 Par langue : `store_NN_<slug>.png` (1080x1920), `feature_graphic.png` (1024x500), `readme_banner.png` (1600x720),
-`social.png` (1200x630). Le générateur refuse une capture de moins de 900 px de large (il n'agrandit jamais)
+`social.png` (1200x630), et `side_NN_<slug>.png` (1920x1080, mode « côté », voir plus bas). Le générateur refuse une capture de moins de 900 px de large (il n'agrandit jamais)
 et avertit si le contraste texte/fond passe sous 4,5:1.
 
 ## Manifeste `<appli>/docs/marketing/manifest.json`
@@ -44,6 +46,26 @@ et avertit si le contraste texte/fond passe sous 4,5:1.
 Tous les chemins sont relatifs au dépôt de l'appli. Optionnels par langue : `feature_capture` (téléphone du feature graphic,
 sinon la 1re capture) et `banner_captures` (3 captures pour l'éventail, sinon les 3 premiers écrans). `glowLight` (0,16), `glowOpacity` (0,55) dans `brand`
 règlent les lueurs de fond (teinte de bg1 éclaircie, jamais l accent pur). `scroll` (par écran, en px de capture) fait défiler la capture vers le haut pour montrer une zone plus basse. Les titres sont réduits automatiquement pour ne jamais déborder.
+
+## Mode « côté » (paysage 1920 x 1080)
+
+Un téléphone entier (~85 % de la hauteur, `tilt` réduit de moitié) d'un côté, un texte court de l'autre : titre très gros
+(police `brand.font`, réduit automatiquement pour tenir sans déborder), sous-titre, puis pastilles en bas. Format accepté
+par Google Play pour les captures téléphone (ratio <= 2:1). Un fichier par écran et par langue du manifeste
+(`out/<langue>/side_NN_<slug>.png`) ; `--no-side` les saute, `--only side_01` n'en produit qu'un.
+
+Champs optionnels par écran :
+
+- `side_title` : 1 à 4 mots forts (sinon `title`) ;
+- `side_subtitle` : une phrase (sinon `subtitle`) ;
+- `side` : `"left"` ou `"right"`, côté du téléphone (sinon alternance : gauche aux écrans impairs, droite aux pairs).
+
+```json
+{"slug": "accueil", "capture": "docs/marketing/captures/fr/accueil.png", "tilt": -3,
+ "title": "Vos données restent sur le téléphone", "subtitle": "Rien n'est envoyé.",
+ "side_title": "Sans compte.", "side_subtitle": "Tout reste sur votre téléphone, rien n'est envoyé.",
+ "side": "left", "chips": ["Hors ligne"]}
+```
 
 ## Ajouter une appli
 

@@ -147,7 +147,12 @@ document.fonts.ready.then(function () {
   document.querySelectorAll('[data-fit]').forEach(function (el) {
     var max = parseFloat(el.dataset.fit), min = parseFloat(el.dataset.min || 20);
     var taille = parseFloat(getComputedStyle(el).fontSize);
-    while (taille > min && (el.scrollHeight > max + 1 || el.scrollWidth > el.clientWidth + 1)) {
+    var lignes = parseFloat(el.dataset.lines || 0);  // nombre de lignes maximal, en plus de la hauteur
+    var trop = function () {
+      return el.scrollHeight > max + 1 || el.scrollWidth > el.clientWidth + 1 ||
+        (lignes && el.scrollHeight > lignes * parseFloat(getComputedStyle(el).lineHeight) + 1);
+    };
+    while (taille > min && trop()) {
       taille -= 2; el.style.fontSize = taille + 'px';
     }
   });
@@ -229,6 +234,32 @@ def vue_store(brand, ecran, racine):
         f'<div class="sous" data-fit="112" data-min="26" style="font-size:38px;width:100%">{html.escape(ecran["subtitle"])}</div>'
         f'{puces_html(ecran.get("chips"), 30, centre=True)}'
         '</div>'
+    )
+    return page(W, H, brand, corps + texte, racine), W, H
+
+
+def vue_cote(brand, ecran, racine, numero):
+    """1920 x 1080 : téléphone entier (~85 % de la hauteur) d'un côté, texte court et gros de l'autre."""
+    W, H = 1920, 1080
+    cote = ecran.get("side") or ("left" if numero % 2 else "right")
+    if cote not in ("left", "right"):
+        raise ErreurManifeste(f"écran {ecran.get('slug')} : side doit valoir « left » ou « right » (reçu {cote!r})")
+    titre = ecran.get("side_title") or ecran["title"]
+    sous = ecran.get("side_subtitle") or ecran["subtitle"]
+    tilt = float(ecran.get("tilt", -3)) / 2
+    echelle = 0.85 * H / BASE_H
+    haut = (H - 0.85 * H) / 2
+    cx_tel = 500 if cote == "left" else W - 500
+    marge = 110
+    x0, x1 = (1000, W - marge) if cote == "left" else (marge, W - 1000)
+    corps = telephone(racine / ecran["capture"], cx_tel, haut, echelle, tilt, 0, 2, ecran.get("scroll", 0))
+    texte = (
+        f'<div style="position:absolute;left:{x0}px;width:{x1 - x0}px;top:90px;height:{H - 180}px;display:flex;'
+        f'flex-direction:column;justify-content:space-between;z-index:5">'
+        f'<div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:40px">'
+        f'<div class="titre" data-fit="560" data-lines="3" data-min="64" style="font-size:172px;width:100%">{html.escape(titre)}</div>'
+        f'<div class="sous" data-fit="170" data-min="28" style="font-size:52px;width:100%">{html.escape(sous)}</div>'
+        f'</div>{puces_html(ecran.get("chips"), 34)}</div>'
     )
     return page(W, H, brand, corps + texte, racine), W, H
 
@@ -346,6 +377,9 @@ def main():
     ap.add_argument("--app-dir", required=True, type=Path, help="dépôt de l'appli (contient docs/marketing/manifest.json)")
     ap.add_argument("--lang", action="append", help="langue à produire (défaut : toutes celles du manifeste)")
     ap.add_argument("--only", help="ne produire que les fichiers dont le nom contient cette chaîne")
+    ap.add_argument("--out-dir", type=Path,
+                    help="dossier de sortie (défaut : <appli>/docs/marketing/out) ; un sous-dossier par langue")
+    ap.add_argument("--no-side", action="store_true", help="ne pas produire les visuels côté (side_NN_*.png, 1920x1080)")
     args = ap.parse_args()
 
     racine = args.app_dir.resolve()
@@ -372,12 +406,16 @@ def main():
         tmp = Path(t)
         for code in langues:
             lang = manifeste["langs"][code]
-            sortie = racine / "docs" / "marketing" / "out" / code
+            sortie = (args.out_dir.resolve() if args.out_dir else racine / "docs" / "marketing" / "out") / code
             sortie.mkdir(parents=True, exist_ok=True)
             print(f"[{code}]")
             travaux = []
             for i, ecran in enumerate(lang["screens"], 1):
                 travaux.append((f"store_{i:02d}_{ecran['slug']}.png", lambda e=ecran: vue_store(brand, e, racine)))
+            if not args.no_side:
+                for i, ecran in enumerate(lang["screens"], 1):
+                    travaux.append((f"side_{i:02d}_{ecran['slug']}.png",
+                                    lambda e=ecran, n=i: vue_cote(brand, e, racine, n)))
             travaux += [
                 ("feature_graphic.png", lambda: vue_feature(brand, lang, racine)),
                 ("readme_banner.png", lambda: vue_banniere(brand, lang, racine)),
