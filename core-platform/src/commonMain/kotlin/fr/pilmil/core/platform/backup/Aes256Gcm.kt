@@ -77,7 +77,7 @@ internal object Aes256Gcm {
 
             var u = hmacSha256(password, u1Input)
             val t = u.copyOf()
-            for (iter in 1 until iterations) {
+            repeat(iterations - 1) {
                 u = hmacSha256(password, u)
                 for (i in t.indices) {
                     t[i] = (t[i].toInt() xor u[i].toInt()).toByte()
